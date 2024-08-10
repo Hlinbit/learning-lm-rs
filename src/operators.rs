@@ -375,10 +375,20 @@ fn test_rms_norm_3() {
     ));
 }
 
-
-
 #[test]
 fn test_matmul_transb() {
+    let mut c = Tensor::<f32>::new(vec![1., 2., 3., 4.], &vec![2, 2]);
+    let a = Tensor::<f32>::new(vec![1., 2., 3., 4., 5., 6.], &vec![2, 3]);
+    let b = Tensor::<f32>::new(vec![1., 2., 3., 4., 5., 6.], &vec![2, 3]);
+    matmul_transb(&mut c, 1., &a, &b, 1.);
+    assert!(c.close_to(
+        &Tensor::<f32>::new(vec![15., 34., 35., 81.], &vec![2, 2]),
+        1e-3
+    ));
+}
+
+#[test]
+fn test_matmul_transb_0() {
     let mut c = Tensor::<f32>::new(vec![
         -0.8113, 1.8005, 1.4450, 0.5919,
         0.4683, -1.2566, -1.1469, 0.2845,
@@ -399,18 +409,6 @@ fn test_matmul_transb() {
             -2.4874, 4.9662, 4.5959, 3.7126,
             1.8443, -3.5247, -4.4398, -2.2889,
         ], &vec![2, 4]),
-        1e-3
-    ));
-}
-
-#[test]
-fn test_matmul_transb_0() {
-    let mut c = Tensor::<f32>::new(vec![1., 2., 3., 4.], &vec![2, 2]);
-    let a = Tensor::<f32>::new(vec![1., 2., 3., 4., 5., 6.], &vec![2, 3]);
-    let b = Tensor::<f32>::new(vec![1., 2., 3., 4., 5., 6.], &vec![2, 3]);
-    matmul_transb(&mut c, 1., &a, &b, 1.);
-    assert!(c.close_to(
-        &Tensor::<f32>::new(vec![15., 34., 35., 81.], &vec![2, 2]),
         1e-3
     ));
 }
