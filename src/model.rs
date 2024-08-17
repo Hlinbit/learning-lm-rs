@@ -167,9 +167,12 @@ fn mlp(
     rms_w: &Tensor<f32>,
     eps: f32,
 ) {
-    todo!("Implement mlp");
+    OP::rms_norm(hidden_states, residual, rms_w, eps);
+    OP::matmul_transb(gate, 0f32, hidden_states, w_gate, 1f32);
+    OP::matmul_transb(up, 0f32, hidden_states, w_up, 1f32);
+    OP::silu(up, gate);
+    OP::matmul_transb(residual, 1f32, up, w_down, 1f32);
 }
-
 #[test]
 pub fn test_mlp() {
     let seq_len = 4;

@@ -113,9 +113,11 @@ pub fn silu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
 // C = beta * C + alpha * A @ B^T
 // hint: You don't need to do an explicit transpose of B
 pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
-    let shape_c = c.shape();
-    let (c_rows, c_cols) = (shape_c[0], shape_c[1]);
-    let inner = a.shape()[1];
+    let shape_a = a.shape();
+    let shape_b = b.shape();
+    let (a_rows, b_rows) = (shape_a[0], shape_b[0]);
+
+    let inner = shape_a[1];
     let _c = unsafe { c.data_mut() };
     let _a = a.data();
     let _b = b.data();
@@ -126,13 +128,13 @@ pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor
     }
 
     // Perform matrix multiplication
-    for x in 0..c_rows {
-        for y in 0..c_cols {
+    for x in 0..a_rows {
+        for y in 0..b_rows {
             let mut sum = 0f32;
             for k in 0..inner {
                 sum += _a[x * inner + k] * _b[y * inner + k];
             }
-            _c[x * c_cols + y] += alpha * sum;
+            _c[x * b_rows + y] += alpha * sum;
         }
     }
 }
