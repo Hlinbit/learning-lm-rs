@@ -22,14 +22,35 @@ pub struct LLamaParams<T> {
 
 impl LLamaParams<f32> {
     pub fn from_safetensors(safetensor: &SafeTensors, config: &LlamaConfigJson) -> Self {
-        todo!("实现从safetensors文件的模型参数加载");
-        // let get_tensor: impl Fn(&str) -> Tensor<f32> = |name: &str| {
-        // ...    
-        // };
-        
-        // LLamaParams {
-        //     embedding_table: get_tensor(...),
-        //     ...
-        // }
+        let get_tensor = |name: &str| {
+            let stensor = safetensor.tensor(name).expect("tensor is not exists");
+            let shape = stensor.shape();
+            // println!("{}", stensor.data().len());
+            let data = stensor.data()
+                                        .chunks(4)
+                                        .map(|chunk| {
+                                            let res = f32::from_ne_bytes(chunk.try_into().unwrap());
+                                            return res;
+                                        }).collect();
+            let s = Vec::from(shape);
+            return Tensor::new(data, &s);
+        };
+
+        let paras = LLamaParams { 
+            w_gate: vec![get_tensor("model.layers.0.mlp.gate_proj.weight"), get_tensor("model.layers.1.mlp.gate_proj.weight")],
+            w_up: vec![get_tensor("model.layers.0.mlp.up_proj.weight"), get_tensor("model.layers.1.mlp.up_proj.weight")],
+            w_down: vec![get_tensor("model.layers.0.mlp.down_proj.weight"), get_tensor("model.layers.1.mlp.down_proj.weight")],
+            lm_head: get_tensor("lm_head.weight"),
+            wq: vec![get_tensor("model.layers.0.self_attn.q_proj.weight"), get_tensor("model.layers.1.self_attn.q_proj.weight")],
+            wk: vec![get_tensor("model.layers.0.self_attn.k_proj.weight"), get_tensor("model.layers.1.self_attn.k_proj.weight")],
+            wv: vec![get_tensor("model.layers.0.self_attn.v_proj.weight"), get_tensor("model.layers.1.self_attn.v_proj.weight")],
+            wo: vec![get_tensor("model.layers.0.self_attn.o_proj.weight"), get_tensor("model.layers.1.self_attn.o_proj.weight")],
+
+            rms_att_w: vec![get_tensor("model.layers.0.input_layernorm.weight"), get_tensor("model.layers.0.input_layernorm.weight")],
+            rms_ffn_w: vec![get_tensor("model.layers.0.post_attention_layernorm.weight"), get_tensor("model.layers.1.post_attention_layernorm.weight")],
+            rms_out_w: get_tensor("model.norm.weight"),
+            embedding_table: get_tensor("lm_head.weight"),
+        };
+        return paras;
     }
 }
