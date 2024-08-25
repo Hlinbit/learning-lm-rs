@@ -3,10 +3,11 @@ use std::vec;
 
 use crate::config::LlamaConfigJson;
 use crate::kvcache::KVCache;
-use crate::operators as OP;
+use crate::operators::{self as OP, masked_softmax};
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
+use serde::de::value;
 use std::path::Path;
 pub struct Llama<T> {
     vocab: usize,           // vocab size
@@ -101,10 +102,14 @@ impl Llama<f32> {
             let full_k = &mut cache.k_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
 
-            todo!("self_attention(...)");
-            todo!("down_proj matmul and add residual");
+            self_attention(&mut hidden_states, &mut att_scores, q, k, v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
+            
+            // println!("{:?}", self.params.wo[layer].shape());
+            OP::matmul_transb(&mut residual, 1.0, &hidden_states, &self.params.wo[layer], 1.0);
 
-            todo!("mlp(...)");
+            mlp(&mut residual, &mut hidden_states, &mut gate_buf, 
+                &mut up_buf, &self.params.w_up[layer],&self.params.w_down[layer], 
+                &self.params.w_gate[layer], &self.params.rms_ffn_w[layer], self.eps);
         }
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
@@ -134,8 +139,18 @@ impl Llama<f32> {
         temperature: f32,
     ) -> Vec<u32>{
         let mut result = Vec::<u32>::new();
-        
-        todo!("实现文本生成");
+        let input = Tensor::new(Vec::from(token_ids), &vec![1, token_ids.len()]);
+
+        for i in 0..max_len {
+            let mut embed = self.forward(&input, &mut self.new_cache());
+            OP::masked_softmax(&mut embed);
+            let data = embed.data();
+            for (_, p) in data.iter().enumerate() {
+                if (*p > top_p) {
+                    
+                }
+            }
+        }
         
         result
     }
@@ -153,7 +168,60 @@ fn self_attention(
     total_seq_len: usize,
     dqkv: usize,
 ) {
-    todo!("Implement self_attention");
+    // println!("{:?}, {:?}", hidden_states.shape(), att_scores.shape());
+    // println!("{:?}, {:?}", q.shape(), k.shape());
+    // println!("{:?}", v.shape());
+    // println!("{}, {}, {}, {}, {}", n_kv_h, n_groups, seq_len, total_seq_len, dqkv);
+    let dim = dqkv;
+    let seq_dim = n_kv_h * dqkv;
+    let hidden_size = n_kv_h * n_groups * dqkv;
+    let hidden_data = unsafe {
+        hidden_states.data_mut()
+    };
+
+    let att_dim_3 = total_seq_len;
+    let att_dim_2 = seq_len * total_seq_len;
+    let att_dim_1 = n_groups * att_dim_2;
+    let att_ptr = unsafe {
+        att_scores.data_mut()
+    };
+    for x in 0..seq_len {
+        for y in 0..total_seq_len {
+            for i in 0..n_kv_h {
+                for group in 0..n_groups {
+                    let start_q = (i * n_groups + group) * dim + seq_dim * n_groups * x;
+                    let q_vec = &q.slice(start_q, &vec![16, 1]);
+                    let start_k = i * dim + seq_dim * y;
+                    let k_vec = &k.slice(start_k, &vec![16, 1]);
+                    let value = OP::dot(q_vec, k_vec) / f32::sqrt(dim as f32);
+                    // assert!(i * att_dim_1 + group * att_dim_2 + x * att_dim_3 + y < n_kv_h * n_groups * seq_len * total_seq_len);
+                    att_ptr[i * att_dim_1 + group * att_dim_2 + x * att_dim_3 + y] = value; 
+                }
+            }
+        }
+    }
+
+    let v_ptr = v.data();
+    masked_softmax(att_scores);
+    for g in 0..n_groups {
+        for i in 0..n_kv_h {
+            for row in 0..seq_len {
+                let att_start = att_dim_1 * i + g * att_dim_2 + row * att_dim_3;
+                let att_vec = &att_scores.slice(att_start, &vec![total_seq_len, 1]);
+                let mut value = 0f32;
+                for col in 0..dqkv {
+                    let mut data =  vec![0f32; total_seq_len];
+                    for k in 0..total_seq_len {
+                        data[k] = v_ptr[col + k * dim * n_kv_h];
+                    }
+                    let v_vec = Tensor::new(data, &vec![total_seq_len, 1]);
+                    value = OP::dot(&v_vec, &att_vec);
+                    hidden_data[row * hidden_size + col + i * dim + g * dim * n_kv_h] = value;
+                }
+            }
+        }
+    }
+    // todo!("Implement self_attention");
 }
 
 fn mlp(
