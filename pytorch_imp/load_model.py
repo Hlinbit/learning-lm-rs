@@ -1,19 +1,22 @@
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 # excute from project directory.
 model_directory = "models/story"
 
-model = AutoModel.from_pretrained(model_directory)
+model = AutoModelForCausalLM.from_pretrained(model_directory)
 
 print(model.config)
-
-for name, param in model.named_parameters():
-    print(f"Name: {name}, Size: {param.size()}")
 
 tokenizer = AutoTokenizer.from_pretrained(model_directory)
 text = "Once upon a time"
 inputs = tokenizer(text, return_tensors="pt")
 outputs_dict = {}
+
+for name, param in model.named_parameters():
+    print(f"Name: {name}, Size: {param.size()}, Type: {param.dtype}")
+    if name == 'model.layers.0.post_attention_layernorm.weight':
+        print(param.detach().numpy()[:])
+
 
 def hook_fn(layer_name):
     def hook(module, input, output):

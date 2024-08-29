@@ -8,6 +8,8 @@ use crate::params::LLamaParams;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
 use serde::de::value;
+
+use crate::minheap::{MinHeap, PPP};
 use std::path::Path;
 pub struct Llama<T> {
     vocab: usize,           // vocab size
@@ -73,7 +75,6 @@ impl Llama<f32> {
         // Computation Starts Here
         // Embedding lookup
         OP::gather(&mut residual, input, &self.params.embedding_table);
-
         for layer in 0..self.n_layers {
             OP::rms_norm(
                 &mut hidden_states,
@@ -102,11 +103,9 @@ impl Llama<f32> {
             let full_k = &mut cache.k_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
 
-            self_attention(&mut hidden_states, &mut att_scores, q, k, v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
-            
-            // println!("{:?}", self.params.wo[layer].shape());
-            OP::matmul_transb(&mut residual, 1.0, &hidden_states, &self.params.wo[layer], 1.0);
-
+            self_attention(&mut hidden_states, &mut att_scores, q, full_k, full_v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
+            // hidden_states.print();
+            OP::matmul_transb(&mut residual, 1f32, &hidden_states, &self.params.wo[layer], 1.0f32);
             mlp(&mut residual, &mut hidden_states, &mut gate_buf, 
                 &mut up_buf, &self.params.w_up[layer],&self.params.w_down[layer], 
                 &self.params.w_gate[layer], &self.params.rms_ffn_w[layer], self.eps);
@@ -139,19 +138,17 @@ impl Llama<f32> {
         temperature: f32,
     ) -> Vec<u32>{
         let mut result = Vec::<u32>::new();
-        let input = Tensor::new(Vec::from(token_ids), &vec![1, token_ids.len()]);
-
-        for i in 0..max_len {
-            let mut embed = self.forward(&input, &mut self.new_cache());
-            OP::masked_softmax(&mut embed);
-            let data = embed.data();
-            for (_, p) in data.iter().enumerate() {
-                if (*p > top_p) {
-                    
-                }
-            }
+        for token in token_ids {
+            result.push(*token);
         }
-        
+        let mut input = Tensor::new(Vec::from(token_ids), &vec![1, token_ids.len()]);
+        let mut cache = self.new_cache();
+        for _ in 0..max_len {
+            let embed = self.forward(&input, &mut cache);
+            let token = OP::random_sample(&embed, top_p, top_k, temperature);
+            result.push(token);
+            input = Tensor::new(vec![token], &vec![1, 1]);
+        }
         result
     }
 }
@@ -174,7 +171,7 @@ fn self_attention(
     // println!("{}, {}, {}, {}, {}", n_kv_h, n_groups, seq_len, total_seq_len, dqkv);
     let dim = dqkv;
     let seq_dim = n_kv_h * dqkv;
-    let hidden_size = n_kv_h * n_groups * dqkv;
+    let hidden_len = n_kv_h * n_groups * dqkv;
     let hidden_data = unsafe {
         hidden_states.data_mut()
     };
@@ -201,22 +198,27 @@ fn self_attention(
         }
     }
 
-    let v_ptr = v.data();
     masked_softmax(att_scores);
-    for g in 0..n_groups {
-        for i in 0..n_kv_h {
+    let v_ptr = v.data();
+    for i in 0..n_kv_h  {
+        for g in 0..n_groups {
+            let att_start = att_dim_1 * i + g * att_dim_2;
+            let att_mat = &att_scores.slice(att_start, &vec![seq_len, total_seq_len]);
+            let mut data = vec![0f32; dqkv * total_seq_len];
+            for row in 0..dqkv {
+                let d_start = row * total_seq_len;
+                for col in 0..total_seq_len {
+                    data[d_start + col] = v_ptr[col * dqkv * n_kv_h + i * dqkv + row];
+                }
+            }
+            let v_mat: Tensor<f32> = Tensor::new(data, &vec![dqkv, total_seq_len]);
+            let mut t_mat: Tensor<f32> = Tensor::default(&vec![seq_len, dqkv]);
+            OP::matmul_transb(&mut t_mat, 0f32, att_mat, &v_mat, 1f32);
+            let t_data = t_mat.data();
             for row in 0..seq_len {
-                let att_start = att_dim_1 * i + g * att_dim_2 + row * att_dim_3;
-                let att_vec = &att_scores.slice(att_start, &vec![total_seq_len, 1]);
-                let mut value = 0f32;
                 for col in 0..dqkv {
-                    let mut data =  vec![0f32; total_seq_len];
-                    for k in 0..total_seq_len {
-                        data[k] = v_ptr[col + k * dim * n_kv_h];
-                    }
-                    let v_vec = Tensor::new(data, &vec![total_seq_len, 1]);
-                    value = OP::dot(&v_vec, &att_vec);
-                    hidden_data[row * hidden_size + col + i * dim + g * dim * n_kv_h] = value;
+                    let hidden_p = row * hidden_len + (i * n_groups + g) * dqkv + col;
+                    hidden_data[hidden_p] = t_data[row * dqkv + col];
                 }
             }
         }

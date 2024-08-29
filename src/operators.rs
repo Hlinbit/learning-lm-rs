@@ -132,7 +132,9 @@ pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor
         for y in 0..b_rows {
             let mut sum = 0f32;
             for k in 0..inner {
-                sum += _a[x * inner + k] * _b[y * inner + k];
+                let av: f32 = _a[x * inner + k];
+                let bv = _b[y * inner + k];
+                sum += av * bv;
             }
             _c[x * b_rows + y] += alpha * sum;
         }

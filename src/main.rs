@@ -3,6 +3,7 @@ mod kvcache;
 mod model;
 mod operators;
 mod params;
+mod minheap;
 mod tensor;
 
 use std::path::PathBuf;
@@ -16,13 +17,13 @@ fn main() {
     let input = "Once upon a time";
     let binding = tokenizer.encode(input, true).unwrap();
     let input_ids = binding.get_ids();
-    println!("\n{}", input);
+    println!("\n{} \n{:?}", input, input_ids);
     let output_ids = llama.generate(
         input_ids,
-        500,
-        0.9,
-        4,
-        1.,
+        100,
+        0.95,
+        50,
+        0.7,
     );
     println!("{}", tokenizer.decode(&output_ids, true).unwrap());
 }
