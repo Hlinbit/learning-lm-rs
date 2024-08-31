@@ -8,8 +8,6 @@ use crate::params::LLamaParams;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
 use serde::de::value;
-
-use crate::minheap::{MinHeap, PPP};
 use std::path::Path;
 pub struct Llama<T> {
     vocab: usize,           // vocab size
@@ -197,8 +195,9 @@ fn self_attention(
             }
         }
     }
-
+    att_scores.slice(0, &vec![seq_len, total_seq_len]).print();
     masked_softmax(att_scores);
+    att_scores.slice(0, &vec![seq_len, total_seq_len]).print();
     let v_ptr = v.data();
     for i in 0..n_kv_h  {
         for g in 0..n_groups {

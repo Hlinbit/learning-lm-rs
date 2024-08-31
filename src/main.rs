@@ -3,7 +3,6 @@ mod kvcache;
 mod model;
 mod operators;
 mod params;
-mod minheap;
 mod tensor;
 
 use std::path::PathBuf;
