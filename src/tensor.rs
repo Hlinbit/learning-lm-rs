@@ -84,7 +84,7 @@ impl Tensor<f32> {
         let batch = self.length / dim;
         for i in 0..batch {
             let start = i * dim;
-            println!("{:?}", &self.data()[start..][..dim]);
+            println!("{:?},", &self.data()[start..][..dim]);
         }
     }
 }

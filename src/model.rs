@@ -102,11 +102,12 @@ impl Llama<f32> {
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
 
             self_attention(&mut hidden_states, &mut att_scores, q, full_k, full_v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
-            // hidden_states.print();
             OP::matmul_transb(&mut residual, 1f32, &hidden_states, &self.params.wo[layer], 1.0f32);
+            hidden_states = Tensor::<f32>::default(&vec![seq_len, self.d]);
             mlp(&mut residual, &mut hidden_states, &mut gate_buf, 
                 &mut up_buf, &self.params.w_up[layer],&self.params.w_down[layer], 
                 &self.params.w_gate[layer], &self.params.rms_ffn_w[layer], self.eps);
+            residual.print();
         }
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
@@ -195,9 +196,7 @@ fn self_attention(
             }
         }
     }
-    att_scores.slice(0, &vec![seq_len, total_seq_len]).print();
     masked_softmax(att_scores);
-    att_scores.slice(0, &vec![seq_len, total_seq_len]).print();
     let v_ptr = v.data();
     for i in 0..n_kv_h  {
         for g in 0..n_groups {

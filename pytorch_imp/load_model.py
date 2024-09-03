@@ -35,7 +35,7 @@ for name, layer in model.named_modules():
 
 # 执行推理
 with torch.no_grad():
-    print(model(**inputs))
+    model(**inputs)
 
 
 
