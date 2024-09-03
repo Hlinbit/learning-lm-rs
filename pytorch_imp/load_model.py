@@ -26,8 +26,6 @@ def hook_fn(layer_name):
         }
     return hook
 
-    
-
 # 注册钩子
 for name, layer in model.named_modules():
     layer_name = f"transformer_layer_{name}"
@@ -35,9 +33,7 @@ for name, layer in model.named_modules():
 
 # 执行推理
 with torch.no_grad():
-    print(model(**inputs))
-
-
+    model(**inputs)
 
 for layer_name, data in outputs_dict.items():
     print(f"Layer: {layer_name}")

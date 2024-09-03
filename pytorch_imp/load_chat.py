@@ -1,0 +1,64 @@
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+# excute from project directory.
+model_directory = "models/chat"
+
+model = AutoModelForCausalLM.from_pretrained(model_directory)
+
+print(model.config)
+
+tokenizer = AutoTokenizer.from_pretrained(model_directory)
+text = "<|im_start|>user\nWhat are some potential applications for quantum computing?<|im_end|>\n<|im_start|>assistant"
+inputs = tokenizer(text, return_tensors="pt")
+print(inputs)
+outputs_dict = {}
+
+for name, param in model.named_parameters():
+    print(f"Name: {name}, Size: {param.size()}, Type: {param.dtype}")
+    if name == 'model.layers.0.post_attention_layernorm.weight':
+        #print(param.detach().numpy()[:])
+        print(param.detach().shape)
+
+
+def hook_fn(layer_name):
+    def hook(module, input, output):
+        if layer_name.startswith('transformer_layer_model.layers.0'):
+            outputs_dict[layer_name] = {
+                "input": input,
+                "output": output
+            }
+    return hook
+
+    
+
+# 注册钩子
+for name, layer in model.named_modules():
+    layer_name = f"transformer_layer_{name}"
+    layer.register_forward_hook(hook_fn(layer_name))
+
+# 执行推理
+with torch.no_grad():
+    model(**inputs)
+
+
+
+for layer_name, data in outputs_dict.items():
+    print(f"Layer: {layer_name}")
+    if isinstance(data['input'], tuple):
+        for t in data['input']:
+            if isinstance(t , torch.Tensor):
+                print(f"Input shape: {t.shape}")
+    else:
+        print(f"Input shape: {data['input'].shape}")
+
+    if isinstance(data['output'], tuple):
+        for t in data['output']:
+            if isinstance(t , torch.Tensor):
+                print(f"Output shape: {t.shape}")
+    elif isinstance(data['output'], torch.Tensor):
+        print(f"Output shape: {data['output'].shape}")
+    else:
+        print(f"Output type: {type(t)}")
+    print(f"Input: {data['input']}")
+    print(f"Output: {data['output']}")
+    print()

@@ -1,28 +1,17 @@
-from transformers import pipeline
+from transformers import pipeline, AutoTokenizer 
 
-generate = pipeline("text-generation", "Felladrin/Minueza-32M-UltraChat")
-
+generate = pipeline("text-generation", model="models/chat", tokenizer="models/chat")
+tokenizer = AutoTokenizer.from_pretrained("models/chat")
 messages = [
-    {
-        "role": "system",
-        "content": "You are a highly knowledgeable and friendly assistant. Your goal is to understand and respond to user inquiries with clarity. Your interactions are always respectful, helpful, and focused on delivering the most accurate information to the user.",
-    },
-    {
-        "role": "user",
-        "content": "Hey! Got a question for you!",
-    },
-    {
-        "role": "assistant",
-        "content": "Sure! What's it?",
-    },
     {
         "role": "user",
         "content": "What are some potential applications for quantum computing?",
     },
 ]
 
-prompt = generate.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
+prompt = "<|im_start|>user\nWhat are some potential applications for quantum computing?<|im_end|>\n<|im_start|>assistant"
+inputs = tokenizer(prompt, return_tensors="pt")
+print(inputs)
 output = generate(
     prompt,
     max_new_tokens=256,
@@ -30,7 +19,11 @@ output = generate(
     temperature=0.65,
     top_k=35,
     top_p=0.55,
-    repetition_penalty=1.176,
+    repetition_penalty=1,
 )
 
 print(output[0]["generated_text"])
+
+
+[32001,  2188,           13, 3195, 460, 741, 4628, 8429, 354, 10915, 21263, 28804, 32000, 28705, 13, 32001, 13892]
+[32001,  2188,    28705, 13, 3195, 460, 741, 4628, 8429, 354, 10915, 21263, 28804, 32000, 28705, 13, 32001, 13892]

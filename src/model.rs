@@ -7,7 +7,6 @@ use crate::operators::{self as OP, masked_softmax};
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
-use serde::de::value;
 use std::path::Path;
 pub struct Llama<T> {
     vocab: usize,           // vocab size
@@ -100,13 +99,14 @@ impl Llama<f32> {
 
             let full_k = &mut cache.k_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
-
             self_attention(&mut hidden_states, &mut att_scores, q, full_k, full_v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
-            // hidden_states.print();
+
             OP::matmul_transb(&mut residual, 1f32, &hidden_states, &self.params.wo[layer], 1.0f32);
+            hidden_states = Tensor::<f32>::default(&vec![seq_len, self.d]);
             mlp(&mut residual, &mut hidden_states, &mut gate_buf, 
                 &mut up_buf, &self.params.w_up[layer],&self.params.w_down[layer], 
                 &self.params.w_gate[layer], &self.params.rms_ffn_w[layer], self.eps);
+            // residual.print();
         }
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
@@ -123,7 +123,6 @@ impl Llama<f32> {
         );
 
         OP::matmul_transb(&mut logits, 0., &hidden_states, &self.params.lm_head, 1.0);
-
         logits
     }
 
@@ -145,6 +144,9 @@ impl Llama<f32> {
             let embed = self.forward(&input, &mut cache);
             let token = OP::random_sample(&embed, top_p, top_k, temperature);
             result.push(token);
+            if token == self.eos_token_id {
+                break;
+            }
             input = Tensor::new(vec![token], &vec![1, 1]);
         }
         result
@@ -185,9 +187,9 @@ fn self_attention(
             for i in 0..n_kv_h {
                 for group in 0..n_groups {
                     let start_q = (i * n_groups + group) * dim + seq_dim * n_groups * x;
-                    let q_vec = &q.slice(start_q, &vec![16, 1]);
+                    let q_vec = &q.slice(start_q, &vec![dim, 1]);
                     let start_k = i * dim + seq_dim * y;
-                    let k_vec = &k.slice(start_k, &vec![16, 1]);
+                    let k_vec = &k.slice(start_k, &vec![dim, 1]);
                     let value = OP::dot(q_vec, k_vec) / f32::sqrt(dim as f32);
                     // assert!(i * att_dim_1 + group * att_dim_2 + x * att_dim_3 + y < n_kv_h * n_groups * seq_len * total_seq_len);
                     att_ptr[i * att_dim_1 + group * att_dim_2 + x * att_dim_3 + y] = value; 
@@ -195,9 +197,9 @@ fn self_attention(
             }
         }
     }
-    att_scores.slice(0, &vec![seq_len, total_seq_len]).print();
+    // att_scores.slice(0, &vec![seq_len, total_seq_len]).print();
     masked_softmax(att_scores);
-    att_scores.slice(0, &vec![seq_len, total_seq_len]).print();
+    // att_scores.slice(0, &vec![seq_len, total_seq_len]).print();
     let v_ptr = v.data();
     for i in 0..n_kv_h  {
         for g in 0..n_groups {

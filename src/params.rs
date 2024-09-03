@@ -22,7 +22,6 @@ pub struct LLamaParams<T> {
 
 impl LLamaParams<f32> {
     pub fn from_safetensors(safetensor: &SafeTensors, config: &LlamaConfigJson) -> Self {
-
         let get_tensor = |name: &str| {
             let stensor = safetensor.tensor(name).expect("tensor is not exists");
             let shape = stensor.shape();
@@ -37,20 +36,28 @@ impl LLamaParams<f32> {
             return Tensor::new(data, &s);
         };
 
-        let paras = LLamaParams { 
-            w_gate: vec![get_tensor("model.layers.0.mlp.gate_proj.weight"), get_tensor("model.layers.1.mlp.gate_proj.weight")],
-            w_up: vec![get_tensor("model.layers.0.mlp.up_proj.weight"), get_tensor("model.layers.1.mlp.up_proj.weight")],
-            w_down: vec![get_tensor("model.layers.0.mlp.down_proj.weight"), get_tensor("model.layers.1.mlp.down_proj.weight")],
-            lm_head: get_tensor("lm_head.weight"),
-            wq: vec![get_tensor("model.layers.0.self_attn.q_proj.weight"), get_tensor("model.layers.1.self_attn.q_proj.weight")],
-            wk: vec![get_tensor("model.layers.0.self_attn.k_proj.weight"), get_tensor("model.layers.1.self_attn.k_proj.weight")],
-            wv: vec![get_tensor("model.layers.0.self_attn.v_proj.weight"), get_tensor("model.layers.1.self_attn.v_proj.weight")],
-            wo: vec![get_tensor("model.layers.0.self_attn.o_proj.weight"), get_tensor("model.layers.1.self_attn.o_proj.weight")],
+        let get_tensors = |template: &str, number: usize| {
+            let mut result: Vec<Tensor<f32>> = Vec::new();
+            for i in 0..number {
+                let name = format!("{}", template.replace("{}", &i.to_string()));
+                result.push(get_tensor(&name));
+            }
+            result
+        };
 
-            rms_att_w: vec![get_tensor("model.layers.0.input_layernorm.weight"), get_tensor("model.layers.0.input_layernorm.weight")],
-            rms_ffn_w: vec![get_tensor("model.layers.0.post_attention_layernorm.weight"), get_tensor("model.layers.1.post_attention_layernorm.weight")],
+        let paras = LLamaParams {
+            embedding_table: get_tensor("model.embed_tokens.weight"),
+            wq: get_tensors("model.layers.{}.self_attn.q_proj.weight", config.num_hidden_layers),
+            wk: get_tensors("model.layers.{}.self_attn.k_proj.weight", config.num_hidden_layers),
+            wv: get_tensors("model.layers.{}.self_attn.v_proj.weight", config.num_hidden_layers),
+            wo: get_tensors("model.layers.{}.self_attn.o_proj.weight", config.num_hidden_layers),
+            rms_att_w: get_tensors("model.layers.{}.input_layernorm.weight", config.num_hidden_layers),
+            w_gate: get_tensors("model.layers.{}.mlp.gate_proj.weight", config.num_hidden_layers),
+            w_up: get_tensors("model.layers.{}.mlp.up_proj.weight", config.num_hidden_layers),
+            w_down: get_tensors("model.layers.{}.mlp.down_proj.weight", config.num_hidden_layers),
+            rms_ffn_w: get_tensors("model.layers.{}.post_attention_layernorm.weight", config.num_hidden_layers),
             rms_out_w: get_tensor("model.norm.weight"),
-            embedding_table: get_tensor("lm_head.weight"),
+            lm_head: get_tensor("lm_head.weight"),
         };
         return paras;
     }
