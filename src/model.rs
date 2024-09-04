@@ -135,9 +135,6 @@ impl Llama<f32> {
         temperature: f32,
     ) -> Vec<u32>{
         let mut result = Vec::<u32>::new();
-        for token in token_ids {
-            result.push(*token);
-        }
         let mut input = Tensor::new(Vec::from(token_ids), &vec![1, token_ids.len()]);
         let mut cache = self.new_cache();
         for _ in 0..max_len {
