@@ -174,7 +174,6 @@ fn self_attention(
     let hidden_data = unsafe {
         hidden_states.data_mut()
     };
-
     let att_dim_3 = total_seq_len;
     let att_dim_2 = seq_len * total_seq_len;
     let att_dim_1 = n_groups * att_dim_2;

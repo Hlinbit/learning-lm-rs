@@ -47,7 +47,7 @@ impl LLamaParams<f32> {
             wv: vec![get_tensor("model.layers.0.self_attn.v_proj.weight"), get_tensor("model.layers.1.self_attn.v_proj.weight")],
             wo: vec![get_tensor("model.layers.0.self_attn.o_proj.weight"), get_tensor("model.layers.1.self_attn.o_proj.weight")],
 
-            rms_att_w: vec![get_tensor("model.layers.0.input_layernorm.weight"), get_tensor("model.layers.0.input_layernorm.weight")],
+            rms_att_w: vec![get_tensor("model.layers.0.input_layernorm.weight"), get_tensor("model.layers.1.input_layernorm.weight")],
             rms_ffn_w: vec![get_tensor("model.layers.0.post_attention_layernorm.weight"), get_tensor("model.layers.1.post_attention_layernorm.weight")],
             rms_out_w: get_tensor("model.norm.weight"),
             embedding_table: get_tensor("lm_head.weight"),
