@@ -107,7 +107,7 @@ impl Llama<f32> {
             mlp(&mut residual, &mut hidden_states, &mut gate_buf, 
                 &mut up_buf, &self.params.w_up[layer],&self.params.w_down[layer], 
                 &self.params.w_gate[layer], &self.params.rms_ffn_w[layer], self.eps);
-            residual.print();
+            // residual.print();
         }
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
@@ -124,7 +124,7 @@ impl Llama<f32> {
         );
 
         OP::matmul_transb(&mut logits, 0., &hidden_states, &self.params.lm_head, 1.0);
-
+        // logits.print();
         logits
     }
 
