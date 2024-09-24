@@ -8,6 +8,8 @@ use crate::params::LLamaParams;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
 use std::path::Path;
+
+use num_traits::{Float};
 pub struct Llama<T> {
     vocab: usize,           // vocab size
     n_layers: usize,        // number of layers
@@ -24,7 +26,7 @@ pub struct Llama<T> {
     eos_token_id: u32,      // end token id
 }
 
-impl Llama<f32> {
+impl<T: Float + Copy + Clone + Default> Llama<T> {
     pub fn from_safetensors(model_dir: impl AsRef<Path>) -> Self {
         let config = File::open(model_dir.as_ref().join("config.json")).unwrap();
         let config: LlamaConfigJson = serde_json::from_reader(config).unwrap();
@@ -49,11 +51,11 @@ impl Llama<f32> {
         }
     }
 
-    pub fn new_cache(&self) -> KVCache<f32> {
+    pub fn new_cache(&self) -> KVCache<T> {
         KVCache::new(self.n_layers, self.max_seq_len, self.n_kv_h * self.dqkv, 0)
     }
 
-    pub fn forward(&self, input: &Tensor<u32>, cache: &mut KVCache<f32>) -> Tensor<f32> {
+    pub fn forward(&self, input: &Tensor<u32>, cache: &mut KVCache<T>) -> Tensor<T> {
         let seq_len = input.size();
         let past_seq_len = cache.len();
         cache.increment(seq_len);
@@ -61,13 +63,13 @@ impl Llama<f32> {
         let n_groups = self.n_q_h / self.n_kv_h;
 
         // Some pre-allocated buffers that will be reused
-        let mut residual = Tensor::<f32>::default(&vec![seq_len, self.d]);
-        let mut hidden_states = Tensor::<f32>::default(&vec![seq_len, self.d]);
-        let mut q_buf = Tensor::<f32>::default(&vec![seq_len, self.n_q_h * self.dqkv]);
+        let mut residual = Tensor::<T>::default(&vec![seq_len, self.d]);
+        let mut hidden_states = Tensor::<T>::default(&vec![seq_len, self.d]);
+        let mut q_buf = Tensor::<T>::default(&vec![seq_len, self.n_q_h * self.dqkv]);
         let mut att_scores =
-            Tensor::<f32>::default(&vec![self.n_kv_h, n_groups, seq_len, total_seq_len]);
-        let mut gate_buf = Tensor::<f32>::default(&vec![seq_len, self.di]);
-        let mut up_buf = Tensor::<f32>::default(&vec![seq_len, self.di]);
+            Tensor::<T>::default(&vec![self.n_kv_h, n_groups, seq_len, total_seq_len]);
+        let mut gate_buf = Tensor::<T>::default(&vec![seq_len, self.di]);
+        let mut up_buf = Tensor::<T>::default(&vec![seq_len, self.di]);
 
         // Computation Starts Here
         // Embedding lookup
@@ -83,9 +85,9 @@ impl Llama<f32> {
             let q = (&mut q_buf).reshape(&vec![seq_len, self.n_q_h * self.dqkv]); // (seq, n_h * dqkv)
             let k = &mut cache.k_cache(layer, past_seq_len); // (seq, n_kv_h * dqkv)
             let v = &mut cache.v_cache(layer, past_seq_len); // (seq, n_kv_h * dqkv)
-            OP::matmul_transb(q, 0., &hidden_states, &self.params.wq[layer], 1.0);
-            OP::matmul_transb(k, 0., &hidden_states, &self.params.wk[layer], 1.0);
-            OP::matmul_transb(v, 0., &hidden_states, &self.params.wv[layer], 1.0);
+            OP::matmul_transb(q, T::zero(), &hidden_states, &self.params.wq[layer], T::one());
+            OP::matmul_transb(k, T::zero(), &hidden_states, &self.params.wk[layer], T::one());
+            OP::matmul_transb(v, T::zero(), &hidden_states, &self.params.wv[layer], T::one());
             OP::rope(
                 q.reshape(&vec![seq_len, self.n_q_h, self.dqkv]),
                 past_seq_len,
@@ -101,8 +103,8 @@ impl Llama<f32> {
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             self_attention(&mut hidden_states, &mut att_scores, q, full_k, full_v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
 
-            OP::matmul_transb(&mut residual, 1f32, &hidden_states, &self.params.wo[layer], 1.0f32);
-            hidden_states = Tensor::<f32>::default(&vec![seq_len, self.d]);
+            OP::matmul_transb(&mut residual, T::one(), &hidden_states, &self.params.wo[layer], T::one());
+            hidden_states = Tensor::<T>::default(&vec![seq_len, self.d]);
             mlp(&mut residual, &mut hidden_states, &mut gate_buf, 
                 &mut up_buf, &self.params.w_up[layer],&self.params.w_down[layer], 
                 &self.params.w_gate[layer], &self.params.rms_ffn_w[layer], self.eps);
@@ -111,7 +113,7 @@ impl Llama<f32> {
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
         // which contains the probabilities for the next token.
-        let mut logits = Tensor::<f32>::default(&vec![1, self.vocab]);
+        let mut logits = Tensor::<T>::default(&vec![1, self.vocab]);
         let mut hidden_states = hidden_states.slice((seq_len - 1) * self.d, &vec![1, self.d]);
         let residual = residual.slice((seq_len - 1) * self.d, &vec![self.d]);
 
@@ -122,7 +124,7 @@ impl Llama<f32> {
             self.eps,
         );
 
-        OP::matmul_transb(&mut logits, 0., &hidden_states, &self.params.lm_head, 1.0);
+        OP::matmul_transb(&mut logits, T::zero(), &hidden_states, &self.params.lm_head, T::one());
         logits
     }
 
@@ -150,18 +152,20 @@ impl Llama<f32> {
     }
 }
 
-fn self_attention(
-    hidden_states: &mut Tensor<f32>, // (seq, n_kv_h * n_groups * dqkv)
-    att_scores: &mut Tensor<f32>,    // (n_kv_h, n_groups, seq, total_seq)
-    q: &Tensor<f32>,                 // (seq, n_kv_h * n_groups * dqkv)
-    k: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv)
-    v: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv)
+fn self_attention<T>(
+    hidden_states: &mut Tensor<T>, // (seq, n_kv_h * n_groups * dqkv)
+    att_scores: &mut Tensor<T>,    // (n_kv_h, n_groups, seq, total_seq)
+    q: &Tensor<T>,                 // (seq, n_kv_h * n_groups * dqkv)
+    k: &Tensor<T>,                 // (total_seq, n_kv_h * dqkv)
+    v: &Tensor<T>,                 // (total_seq, n_kv_h * dqkv)
     n_kv_h: usize,
     n_groups: usize,
     seq_len: usize,
     total_seq_len: usize,
     dqkv: usize,
-) {
+)where
+    T: Float + Copy + Clone + Default, 
+{
     // println!("{:?}, {:?}", hidden_states.shape(), att_scores.shape());
     // println!("{:?}, {:?}", q.shape(), k.shape());
     // println!("{:?}", v.shape());
@@ -187,7 +191,7 @@ fn self_attention(
                     let q_vec = &q.slice(start_q, &vec![dim, 1]);
                     let start_k = i * dim + seq_dim * y;
                     let k_vec = &k.slice(start_k, &vec![dim, 1]);
-                    let value = OP::dot(q_vec, k_vec) / f32::sqrt(dim as f32);
+                    let value = OP::dot(q_vec, k_vec) / T::from(f32::sqrt(dim as f32)).unwrap();
                     // assert!(i * att_dim_1 + group * att_dim_2 + x * att_dim_3 + y < n_kv_h * n_groups * seq_len * total_seq_len);
                     att_ptr[i * att_dim_1 + group * att_dim_2 + x * att_dim_3 + y] = value; 
                 }
@@ -202,16 +206,16 @@ fn self_attention(
         for g in 0..n_groups {
             let att_start = att_dim_1 * i + g * att_dim_2;
             let att_mat = &att_scores.slice(att_start, &vec![seq_len, total_seq_len]);
-            let mut data = vec![0f32; dqkv * total_seq_len];
+            let mut data = vec![T::zero(); dqkv * total_seq_len];
             for row in 0..dqkv {
                 let d_start = row * total_seq_len;
                 for col in 0..total_seq_len {
                     data[d_start + col] = v_ptr[col * dqkv * n_kv_h + i * dqkv + row];
                 }
             }
-            let v_mat: Tensor<f32> = Tensor::new(data, &vec![dqkv, total_seq_len]);
-            let mut t_mat: Tensor<f32> = Tensor::default(&vec![seq_len, dqkv]);
-            OP::matmul_transb(&mut t_mat, 0f32, att_mat, &v_mat, 1f32);
+            let v_mat: Tensor<T> = Tensor::new(data, &vec![dqkv, total_seq_len]);
+            let mut t_mat: Tensor<T> = Tensor::default(&vec![seq_len, dqkv]);
+            OP::matmul_transb(&mut t_mat, T::zero(), att_mat, &v_mat, T::one());
             let t_data = t_mat.data();
             for row in 0..seq_len {
                 for col in 0..dqkv {
@@ -224,22 +228,24 @@ fn self_attention(
     // todo!("Implement self_attention");
 }
 
-fn mlp(
-    residual: &mut Tensor<f32>,
-    hidden_states: &mut Tensor<f32>,
-    gate: &mut Tensor<f32>,
-    up: &mut Tensor<f32>,
-    w_up: &Tensor<f32>,
-    w_down: &Tensor<f32>,
-    w_gate: &Tensor<f32>,
-    rms_w: &Tensor<f32>,
+fn mlp<T>(
+    residual: &mut Tensor<T>,
+    hidden_states: &mut Tensor<T>,
+    gate: &mut Tensor<T>,
+    up: &mut Tensor<T>,
+    w_up: &Tensor<T>,
+    w_down: &Tensor<T>,
+    w_gate: &Tensor<T>,
+    rms_w: &Tensor<T>,
     eps: f32,
-) {
+) where 
+    T: Float + Copy + Clone + Default,
+{
     OP::rms_norm(hidden_states, residual, rms_w, eps);
-    OP::matmul_transb(gate, 0f32, hidden_states, w_gate, 1f32);
-    OP::matmul_transb(up, 0f32, hidden_states, w_up, 1f32);
+    OP::matmul_transb(gate, T::zero(), hidden_states, w_gate, T::one());
+    OP::matmul_transb(up, T::zero(), hidden_states, w_up, T::one());
     OP::silu(up, gate);
-    OP::matmul_transb(residual, 1f32, up, w_down, 1f32);
+    OP::matmul_transb(residual, T::one(), up, w_down, T::one());
 }
 #[test]
 pub fn test_mlp() {

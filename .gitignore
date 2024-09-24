@@ -3,3 +3,5 @@ Cargo.lock
 .vscode
 chat
 .DS_Store
+chat16
+tiny-llama

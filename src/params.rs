@@ -20,24 +20,20 @@ pub struct LLamaParams<T> {
     pub lm_head: Tensor<T>,   // (vocab_size, dim)
 }
 
-impl LLamaParams<f32> {
+impl<T: Copy + Clone + Default> LLamaParams<T> {
     pub fn from_safetensors(safetensor: &SafeTensors, config: &LlamaConfigJson) -> Self {
         let get_tensor = |name: &str| {
             let stensor = safetensor.tensor(name).expect("tensor is not exists");
             let shape = stensor.shape();
             // println!("{}", stensor.data().len());
-            let data = stensor.data()
-                                        .chunks(4)
-                                        .map(|chunk| {
-                                            let res = f32::from_ne_bytes(chunk.try_into().unwrap());
-                                            return res;
-                                        }).collect();
+            let n_blocks = stensor.data().len() / std::mem::size_of::<T>();
+            let data = unsafe { std::slice::from_raw_parts(stensor.data().as_ptr() as *const T, n_blocks) };
             let s = Vec::from(shape);
-            return Tensor::new(data, &s);
+            return Tensor::new(data.to_vec(), &s);
         };
 
         let get_tensors = |template: &str, number: usize| {
-            let mut result: Vec<Tensor<f32>> = Vec::new();
+            let mut result: Vec<Tensor<T>> = Vec::new();
             for i in 0..number {
                 let name = format!("{}", template.replace("{}", &i.to_string()));
                 result.push(get_tensor(&name));
