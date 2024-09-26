@@ -1,6 +1,5 @@
 use crate::tensor::Tensor;
-use num_traits::{Float, Zero};
-use std::cmp::Ordering;
+use num_traits::Float;
 
 // get (row) vectors from a 2D table given a list of indices
 pub fn gather<T>(y: &mut Tensor<T>, indices: &Tensor<u32>, table: &Tensor<T>) 

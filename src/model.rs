@@ -8,8 +8,9 @@ use crate::params::LLamaParams;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
 use std::path::Path;
-
-use num_traits::{Float};
+use std::time::Instant;
+use log::debug;
+use num_traits::Float;
 pub struct Llama<T> {
     vocab: usize,           // vocab size
     n_layers: usize,        // number of layers
@@ -75,13 +76,14 @@ impl<T: Float + Copy + Clone + Default> Llama<T> {
         // Embedding lookup
         OP::gather(&mut residual, input, &self.params.embedding_table);
         for layer in 0..self.n_layers {
+            let total_start = Instant::now();
             OP::rms_norm(
                 &mut hidden_states,
                 &residual,
                 &self.params.rms_att_w[layer],
                 self.eps,
             );
-
+            let qkv_start = Instant::now();
             let q = (&mut q_buf).reshape(&vec![seq_len, self.n_q_h * self.dqkv]); // (seq, n_h * dqkv)
             let k = &mut cache.k_cache(layer, past_seq_len); // (seq, n_kv_h * dqkv)
             let v = &mut cache.v_cache(layer, past_seq_len); // (seq, n_kv_h * dqkv)
@@ -99,15 +101,26 @@ impl<T: Float + Copy + Clone + Default> Llama<T> {
                 self.rope_theta,
             );
 
+            let qkv_duration = qkv_start.elapsed();
+            debug!("QKV projection Time elapsed: {:?}", qkv_duration);
+
+            let self_start = Instant::now();
             let full_k = &mut cache.k_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             self_attention(&mut hidden_states, &mut att_scores, q, full_k, full_v, self.n_kv_h, n_groups, seq_len, total_seq_len, self.dqkv);
-
             OP::matmul_transb(&mut residual, T::one(), &hidden_states, &self.params.wo[layer], T::one());
+            let self_duration = self_start.elapsed();
+            debug!("Self Attention Time elapsed: {:?}", self_duration);
             hidden_states = Tensor::<T>::default(&vec![seq_len, self.d]);
+
+            let mlp_start = Instant::now();
             mlp(&mut residual, &mut hidden_states, &mut gate_buf, 
                 &mut up_buf, &self.params.w_up[layer],&self.params.w_down[layer], 
                 &self.params.w_gate[layer], &self.params.rms_ffn_w[layer], self.eps);
+            let mlp_duration = mlp_start.elapsed();
+            debug!("mlp Time elapsed: {:?}", mlp_duration);
+            let total_duration = total_start.elapsed();
+            debug!("One Layer Time elapsed: {:?}", total_duration);
             // residual.print();
         }
 

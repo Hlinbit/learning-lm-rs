@@ -1,4 +1,6 @@
-use std::{slice, sync::Arc, vec};
+use std::{fmt::{Debug, Display}, slice, sync::Arc, vec};
+
+use num_traits::Float;
 pub struct Tensor<T> {
     data: Arc<Box<[T]>>,
     shape: Vec<usize>,
@@ -66,7 +68,7 @@ impl<T: Copy + Clone + Default> Tensor<T> {
 }
 
 // Some helper functions for testing and debugging
-impl Tensor<f32> {
+impl<T: Clone + Copy + Default + Float> Tensor<T> {
     #[allow(unused)]
     pub fn close_to(&self, other: &Self, rel: f32) -> bool {
         if self.shape() != other.shape() {
@@ -75,7 +77,7 @@ impl Tensor<f32> {
         let a = self.data();
         let b = other.data();
         
-        return a.iter().zip(b).all(|(x, y)| float_eq(x, y, rel));
+        return a.iter().zip(b).all(|(x, y)| float_eq(&x.to_f32().unwrap(), &y.to_f32().unwrap(), rel));
     }
     #[allow(unused)]
     pub fn print(&self){
@@ -84,7 +86,10 @@ impl Tensor<f32> {
         let batch = self.length / dim;
         for i in 0..batch {
             let start = i * dim;
-            println!("{:?},", &self.data()[start..][..dim]);
+            let slice = &self.data()[start..][..dim];
+
+            let converted_slice: Vec<f32> = slice.iter().map(|&x| x.to_f32().unwrap()).collect();
+            println!("{:?},", converted_slice);
         }
     }
 }

@@ -1,7 +1,7 @@
 from transformers import pipeline, AutoTokenizer 
 
-generate = pipeline("text-generation", model="models/chat", tokenizer="models/chat")
-tokenizer = AutoTokenizer.from_pretrained("models/chat")
+generate = pipeline("text-generation", model="models/chat16", tokenizer="models/chat16")
+tokenizer = AutoTokenizer.from_pretrained("models/chat16")
 messages = [
     {
         "role": "user",
@@ -11,7 +11,6 @@ messages = [
 
 prompt = "<|im_start|>user\nWhat are some potential applications for quantum computing?<|im_end|>\n<|im_start|>assistant"
 inputs = tokenizer(prompt, return_tensors="pt")
-print(inputs)
 output = generate(
     prompt,
     max_new_tokens=256,
@@ -23,7 +22,3 @@ output = generate(
 )
 
 print(output[0]["generated_text"])
-
-
-[32001,  2188,           13, 3195, 460, 741, 4628, 8429, 354, 10915, 21263, 28804, 32000, 28705, 13, 32001, 13892]
-[32001,  2188,    28705, 13, 3195, 460, 741, 4628, 8429, 354, 10915, 21263, 28804, 32000, 28705, 13, 32001, 13892]

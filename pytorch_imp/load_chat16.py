@@ -1,30 +1,35 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import MistralForCausalLM, AutoTokenizer
 import torch
 # excute from project directory.
 model_directory = "models/chat16"
 
-model = AutoModelForCausalLM.from_pretrained(model_directory, torch_dtype=torch.float16)
+model = MistralForCausalLM.from_pretrained(model_directory)
 
 print(model.config)
 
 tokenizer = AutoTokenizer.from_pretrained(model_directory)
-text = "Once upon a time"
+text = "<|im_start|>user\nWhat are some potential applications for quantum computing?<|im_end|>\n<|im_start|>assistant"
 inputs = tokenizer(text, return_tensors="pt")
+print(inputs)
 outputs_dict = {}
 
 for name, param in model.named_parameters():
     print(f"Name: {name}, Size: {param.size()}, Type: {param.dtype}")
-    # if name == 'model.layers.0.post_attention_layernorm.weight':
-    #    print(param.detach().numpy()[:])
+    if name == 'model.layers.0.post_attention_layernorm.weight':
+        #print(param.detach().numpy()[:])
+        print(param.detach().shape)
 
 
 def hook_fn(layer_name):
     def hook(module, input, output):
-        outputs_dict[layer_name] = {
-            "input": input,
-            "output": output
-        }
+        if layer_name.startswith('transformer_layer_model.layers.8'):
+            outputs_dict[layer_name] = {
+                "input": input,
+                "output": output
+            }
     return hook
+
+    
 
 # 注册钩子
 for name, layer in model.named_modules():
@@ -34,6 +39,8 @@ for name, layer in model.named_modules():
 # 执行推理
 with torch.no_grad():
     model(**inputs)
+
+
 
 for layer_name, data in outputs_dict.items():
     print(f"Layer: {layer_name}")
