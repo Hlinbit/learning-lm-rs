@@ -22,13 +22,14 @@ enum LlamaEnum {
     F16(model::Llama<f16>),
 }
 
-fn main() {
+
+fn main() -> io::Result<()> {
     env_logger::init();
     let project_dir = env!("CARGO_MANIFEST_DIR");
-    let model_dir = PathBuf::from(project_dir).join("models").join("chat16");
+    let model_dir = PathBuf::from(project_dir).join("models").join("chat");
     let config = File::open(model_dir.join("config.json")).unwrap();
     let config: LlamaConfigJson = serde_json::from_reader(config).unwrap();
-    let llama: LlamaEnum;
+    let mut llama: LlamaEnum;
     if config.torch_dtype == "float32" {
         llama = LlamaEnum::F32(model::Llama::<f32>::from_safetensors(&model_dir));
     } else {
@@ -36,6 +37,7 @@ fn main() {
     }
     let tokenizer = Tokenizer::from_file(model_dir.join("tokenizer.json")).unwrap();
     let mut user_name = String::from("default");
+
     loop {
         print!(">>> ");
         io::stdout().flush().unwrap();
@@ -47,8 +49,8 @@ fn main() {
         let input = input.trim();
         // let input = "";
         match input {
-            "login" => {user_name = user::login(); continue;},
-            "logout" => {user::logout(&user_name); user_name = String::from("default"); continue;},
+            "login" => {user_name = user::login(&mut llama); continue;},
+            "logout" => {user::logout(&user_name, &mut llama); user_name = String::from("default"); continue;},
             "exit" => {break;},
             "quit" => {break;},
             _ => {}
@@ -61,7 +63,7 @@ fn main() {
         debug!("\n{} \n{:?}", input, input_ids);
         let mut output_ids = vec![0u32,0];
         match llama {
-            LlamaEnum::F32(ref llama_f32) => {
+            LlamaEnum::F32(ref mut llama_f32) => {
                 // 使用 Llama<f32> 的逻辑
                 output_ids = llama_f32.generate(
                     input_ids,
@@ -69,16 +71,16 @@ fn main() {
                     0.55,
                     35,
                     0.65,
-                );
+                )?;
             },
-            LlamaEnum::F16(ref llama_f16) => {
+            LlamaEnum::F16(ref mut llama_f16) => {
                 output_ids = llama_f16.generate(
                     input_ids,
                     256,
                     0.55,
                     35,
                     0.65,
-                );
+                )?;
             }
         }
         println!("{}", tokenizer.decode(&output_ids, true).unwrap());
@@ -92,4 +94,5 @@ fn main() {
     // Print memory usage (RSS and VMS)
     println!("Memory usage (RSS): {} KB", memory_info.rss() / 1024);
     println!("Virtual memory size (VMS): {} KB", memory_info.vms() / 1024);
+    Ok(())
 }

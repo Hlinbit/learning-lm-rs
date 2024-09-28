@@ -2,13 +2,15 @@ use std::fs::File;
 use std::vec;
 
 use crate::config::LlamaConfigJson;
-use crate::kvcache::KVCache;
+use crate::kvcache::{self, CacheManager, KVCache};
 use crate::operators::{self as OP, masked_softmax};
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
+use bytemuck::Pod;
 use safetensors::SafeTensors;
 use std::path::Path;
 use std::time::Instant;
+use std::io::{self};
 use log::debug;
 use num_traits::Float;
 pub struct Llama<T> {
@@ -25,15 +27,23 @@ pub struct Llama<T> {
     params: LLamaParams<T>, // trained weights of this model
     bos_token_id: u32,      // start token id
     eos_token_id: u32,      // end token id
+    cache_manager: kvcache::CacheManager<T>,
+    data_type: String,
 }
 
-impl<T: Float + Copy + Clone + Default> Llama<T> {
+impl<T: Float + Copy + Clone + Default + Pod> Llama<T> {
     pub fn from_safetensors(model_dir: impl AsRef<Path>) -> Self {
         let config = File::open(model_dir.as_ref().join("config.json")).unwrap();
         let config: LlamaConfigJson = serde_json::from_reader(config).unwrap();
         let model_file = std::fs::read(model_dir.as_ref().join("model.safetensors")).unwrap();
         let safetensor = SafeTensors::deserialize(&model_file).unwrap();
         let params = LLamaParams::from_safetensors(&safetensor, &config);
+        let mut dtype = "";
+        if config.torch_dtype == "float32" {
+            dtype = "f32"
+        } else {
+            dtype = "f16"
+        }
 
         Self {
             vocab: config.vocab_size,
@@ -49,15 +59,28 @@ impl<T: Float + Copy + Clone + Default> Llama<T> {
             params: params,
             bos_token_id: config.bos_token_id,
             eos_token_id: config.eos_token_id,
+            cache_manager: CacheManager::new(config.num_hidden_layers, config.max_position_embeddings, config.num_key_value_heads * config.hidden_size / config.num_attention_heads),
+            data_type: String::from(dtype),
         }
     }
 
-    pub fn new_cache(&self) -> KVCache<T> {
-        KVCache::new(self.n_layers, self.max_seq_len, self.n_kv_h * self.dqkv, 0)
+    pub fn store_cache(&mut self) {
+        let _ = self.cache_manager.store(&self.data_type);
+        self.cache_manager.cache = None;
+        self.cache_manager.current_name = String::from("default");
+        
     }
 
-    pub fn forward(&self, input: &Tensor<u32>, cache: &mut KVCache<T>) -> Tensor<T> {
+    pub fn load_cache(&mut self, name: &str) {
+        self.cache_manager.current_name = String::from(name);
+        let _ = self.cache_manager.load();
+    }
+
+    pub fn forward(&mut self, input: &Tensor<u32>) -> Tensor<T> {
         let seq_len = input.size();
+
+        let cache = self.cache_manager.cache.as_mut().unwrap();
+
         let past_seq_len = cache.len();
         cache.increment(seq_len);
         let total_seq_len = past_seq_len + seq_len;
@@ -142,18 +165,17 @@ impl<T: Float + Copy + Clone + Default> Llama<T> {
     }
 
     pub fn generate(
-        &self,
+        &mut self,
         token_ids: &[u32],
         max_len: usize,
         top_p: f32,
         top_k: u32,
         temperature: f32,
-    ) -> Vec<u32>{
+    ) -> io::Result<Vec<u32>>{
         let mut result = Vec::<u32>::new();
         let mut input = Tensor::new(Vec::from(token_ids), &vec![1, token_ids.len()]);
-        let mut cache = self.new_cache();
         for _ in 0..max_len {
-            let embed = self.forward(&input, &mut cache);
+            let embed = self.forward(&input);
             let token = OP::random_sample(&embed, top_p, top_k, temperature);
             result.push(token);
             if token == self.eos_token_id {
@@ -161,7 +183,7 @@ impl<T: Float + Copy + Clone + Default> Llama<T> {
             }
             input = Tensor::new(vec![token], &vec![1, 1]);
         }
-        result
+        Ok(result)
     }
 }
 
